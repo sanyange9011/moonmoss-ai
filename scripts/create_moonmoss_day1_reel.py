@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import os
+import subprocess
 
 # ============================================
 # 설정
@@ -192,12 +193,37 @@ def fade_out(frame, progress):
 # 메인 영상 생성
 # ============================================
 
+def _transcode_to_h264(raw_path, final_path):
+    """OpenCV가 mp4v로 쓴 영상은 대부분의 브라우저/플레이어에서 재생되지 않으므로
+    ffmpeg로 H.264로 다시 인코딩함"""
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", raw_path,
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                "-crf", "20",
+                final_path,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        os.remove(raw_path)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"⚠️  H.264 재인코딩 실패 (ffmpeg 필요): {e}")
+        print("   mp4v 코덱 영상은 일부 브라우저/플레이어에서 재생되지 않을 수 있습니다.")
+        os.replace(raw_path, final_path)
+
 def create_video():
     """메인 비디오 생성 함수"""
 
-    # 비디오 라이터 설정
+    # 비디오 라이터 설정 (OpenCV는 mp4v로만 안정적으로 쓸 수 있어 일단 여기에 쓰고,
+    # 브라우저/플레이어 호환을 위해 마지막에 H.264로 재인코딩함)
+    raw_path = OUTPUT_VIDEO + ".raw.mp4"
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(OUTPUT_VIDEO, fourcc, FPS, (VIDEO_WIDTH, VIDEO_HEIGHT))
+    out = cv2.VideoWriter(raw_path, fourcc, FPS, (VIDEO_WIDTH, VIDEO_HEIGHT))
 
     if not out.isOpened():
         print("❌ 비디오 라이터를 열 수 없습니다.")
@@ -396,6 +422,9 @@ def create_video():
             print(f"  [{frame_num + 1}/{total_frames}] {(frame_num + 1) / total_frames * 100:.1f}% 완료")
 
     out.release()
+
+    print("\n🎞️  H.264로 재인코딩 중... (브라우저/플레이어 호환)")
+    _transcode_to_h264(raw_path, OUTPUT_VIDEO)
     print(f"\n✅ 영상 생성 완료: {OUTPUT_VIDEO}")
 
 # ============================================
@@ -405,7 +434,6 @@ def create_video():
 def add_audio_to_video(video_path, audio_path, output_path):
     """오디오를 비디오에 추가"""
     try:
-        import subprocess
         command = [
             "ffmpeg",
             "-i", video_path,
